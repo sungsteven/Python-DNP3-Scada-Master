@@ -6,7 +6,8 @@ import binascii
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, scrolledtext, END
+from tkinter.font import NORMAL
 import serial.tools.list_ports
 import pydnp3_master.DNP3_SC.dnp3master as Dnp3master
 
@@ -53,6 +54,7 @@ class ToolTip:
             tw.destroy()
 
 padding = {'padx': 5, 'pady': 5, 'sticky': tk.W}
+padding_aligned_ontop = {'padx': 5, 'pady': 2, 'sticky': tk.NW}
 class SCADA_Master_GUI:
     def __init__(self, parent):
         self.parent = parent
@@ -83,35 +85,42 @@ class SCADA_Master_GUI:
         self.scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree_item_index = 0
         self.configure_tree()
-        self.cmd_frame = Labelframe(parent, width=1200, height=300)
+        self.cmd_frame = Labelframe(parent, width=500, height=300)
         self.configure_cmd_frame()
-        self.issue_dnpreq_btn = ttk.Button(self.cmd_frame, text='Send Request', command=self.issue_request)
-        self.issue_dnpreq_btn.grid(column=1, row=1, **padding)
-        self.cmd_frame.grid_forget()
         self.start_time = datetime.now()
         
     def configure_cmd_frame(self):
         self.cmd_frame.grid(column=0, row=13, **padding)
         self.cmd_combo_label = ttk.Label(self.cmd_frame, text="Please select a DNP requisition command:")
         self.cmd_combo_label.grid(column=0, row=0, **padding)
-        self.cmd_combo = ttk.Combobox(self.cmd_frame, width=30, state='readonly')
-        self.cmd_combo.grid(column=0, row=1, **padding)
+        self.cmd_combo = ttk.Combobox(self.cmd_frame, width=40, state='readonly')
+        self.cmd_combo.grid(column=0, row=1, **padding_aligned_ontop)
         self.cmd_combo['values'] = [dnp_req.name 
                             for dnp_req in Dnp3master.DNP_Request]
         self.cmd_combo.current(8)
         self.cmd_combo.bind('<<ComboboxSelected>>', self.req_change)
+        self.issue_dnpreq_btn = ttk.Button(self.cmd_frame, text='Send Request', command=self.issue_request)
+        self.issue_dnpreq_btn.grid(column=1, row=1, **padding_aligned_ontop)
         self.optional_arg = tk.StringVar()
-        self.optional_arg_entry = ttk.Entry(self.cmd_frame, width=80, textvariable=self.optional_arg)
-        self.optional_arg_entry.grid(column=0, row=2, columnspan=3, **padding)
-        self.arg_combo = ttk.Combobox(self.cmd_frame, width=30, state='readonly')
-        self.arg_combo.grid(column=0, row=2, **padding)
+        self.optional_arg_entry = ttk.Entry(self.cmd_frame, width=40, textvariable=self.optional_arg)
+        self.optional_arg_entry.grid(column=0, row=2, columnspan=3, **padding_aligned_ontop)
+        self.arg_combo = ttk.Combobox(self.cmd_frame, width=40, state='readonly')
+        self.arg_combo.grid(column=0, row=2, **padding_aligned_ontop)
         self.arg_combo['values'] = [dnp_cmd.name for dnp_cmd in Dnp3master.DNP_Command]
-        self.arg_combo.current(33)
+        self.arg_combo.current(8)
+        self.arg_combo.grid_forget()
+        
+        self.readout_label = ttk.Label(self.cmd_frame, text='Readout Per Solicited Request')
+        self.readout_label.grid(column=2, row=0, **padding_aligned_ontop)
+        self.readout_scroll = scrolledtext.ScrolledText(self.cmd_frame, wrap=tk.WORD, width=32, height=5)
+        self.readout_scroll.config(state=NORMAL)
+        self.readout_scroll.grid(column=2, row=2, columnspan=3, **padding_aligned_ontop)
         
         self.tooltip = ToolTip(self.optional_arg_entry, 'No argument required')
         self.optional_arg_entry.bind("<Enter>", lambda event: self.tooltip.showtip(self.cmd_combo.get()))
         self.optional_arg_entry.bind("<Leave>", lambda event: self.tooltip.hidetip())
-        
+        self.cmd_frame.grid_forget()
+            
     def configure_style(self):
         self.style.element_create("Custom.Treeheading.border", "from", "default")
         self.style.layout("Custom.Treeview.Heading", [
@@ -244,9 +253,6 @@ class SCADA_Master_GUI:
                                                baud_rate=baudRateVal)
         if self.dnpMaster is not None:
             self.cmd_frame.grid(column=0, row=13, **padding)
-            self.cmd_combo.current(8)
-            self.arg_combo.grid_forget()
-            self.optional_arg_entry.grid_forget()
             self.dnpMaster.logger.setLevel("DEBUG")
             self.address = (dnpAddress, 0)
 
@@ -267,16 +273,17 @@ class SCADA_Master_GUI:
                             child.configure(state='enable')
                 for item in self.tree.get_children():
                     self.tree.delete(item)
-                    
                 # issue an operation command to reset link right after connection is established
                 # Simulate selecting a value from cmd_combo
                 self.cmd_combo.current(7)  # Select the item Issue_DNP_Command (index 7)
-
                 # Simulate selecting a value from arg_combo
                 self.arg_combo.current(8)  # Select the item Reset_Link (index 8)
-
                 # Simulate clicking the button
                 self.issue_dnpreq_btn.invoke()
+                # set command to manual operation
+                self.cmd_combo.current(8)   
+                self.optional_arg_entry.grid(column=0, row=2, columnspan=3, **padding_aligned_ontop)
+                self.arg_combo.grid_forget()
             else:   # when connection is not made
                 self.conn_button.config(state='enable')
                 self.disconn_button.config(state='disable')
@@ -350,16 +357,12 @@ class SCADA_Master_GUI:
             
     def req_change(self, event):
         """ handle the dnp requisition command changed event """
-        selected_dnpreq = self.cmd_combo.get()
-        if '_Point' in selected_dnpreq:   # add option argument to read/write single point value
-            self.arg_combo.grid_forget()
-            self.optional_arg_entry.grid(column=0, row=2, columnspan=3, **padding)
-        elif selected_dnpreq == 'Issue_DNP_Command':
+        if self.cmd_combo.get() == 'Issue_DNP_Command':
             self.optional_arg_entry.grid_forget()
-            self.arg_combo.grid(column=0, row=2, **padding)
+            self.arg_combo.grid(column=0, row=2, **padding_aligned_ontop)
         else:
-            self.arg_combo.grid_forget()
-            self.optional_arg_entry.grid_forget()        
+            self.arg_combo.grid_forget()    # add option argument to read/write single point value
+            self.optional_arg_entry.grid(column=0, row=2, columnspan=3, **padding_aligned_ontop)       
 
     def read_from_socket(self):
         def receive_sequence():
@@ -389,6 +392,14 @@ class SCADA_Master_GUI:
                         manage_unsolicited_queue(self.unsolicitedMsgQueue, byte_data)
                     readout_frame = Dnp3master.ReceivedFrame.convert2frame(byte_data, index == 0)
                     self.add_items_to_treeview(readout_frame.__dict__, table_title)
+                    if (readout_value := self.get_readout_value(readout_frame.__dict__)):
+                        readout_title_text_list = table_title[(table_title.find("]") + 1):].strip().split()
+                        display_title = readout_title_text_list[0] + ' ' + readout_title_text_list[-1]
+                        self.readout_scroll.delete('1.0', END)
+                        self.readout_scroll.insert(END, f'{display_title}\n{readout_value}')
+                        # self.readout_scroll.yview(END)
+                        # move the vertical scroll bar to top
+                        self.readout_scroll.yview_moveto(0.0)
                     print('Done with this sequence reading!')
                 handle_confirmation(cat_seq_bytes, self.address, self.dnpMaster)
             
@@ -466,6 +477,15 @@ class SCADA_Master_GUI:
                 self.stopFromThreadQueue.put(False)
                 # socket_conn.quit(conn_status_val)
                 break
+
+    def get_readout_value(self, readout_dict:dict):
+        if 'application_data' not in readout_dict:
+            return '' 
+        for key, value in readout_dict['application_data'].items():
+            if key not in {'Control', 'Function', 'Internal Indicator'}:
+                break
+        return value['Object Data'] if (value and type(value) is dict and 'Object Data' in value) else ''
+            
 
 if __name__ == '__main__':
     window = tk.Tk()
